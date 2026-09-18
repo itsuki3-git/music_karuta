@@ -4,12 +4,13 @@ import io
 import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+# ★ 引数に source_img_path と source_img_bytes の両方を定義し、どちらが送られてきても100%クラッシュしないようにしました
 def generate_l_size_image(
     qr_url, text_line1, text_line2, bottom_text_upper, lyricist, composer, arranger, 
-    notes_text, source_img_bytes=None
+    notes_text, source_img_path=None, source_img_bytes=None
 ):
     """
-    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（Web・スマホ完全対応版）
+    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（Web・サーバー両対応の完全版）
     """
     width = 1500
     height = 1051
@@ -20,25 +21,22 @@ def generate_l_size_image(
     center_x = width // 2
     draw.line((center_x, 0, center_x, height), fill=(0, 0, 0), width=5)
 
-    # 2. 左側：正方形写真の加工・配置（★パスではなく、ブラウザから届いたデータから直接復元）
+    # 2. 左側：正方形写真の加工・配置
     photo_bottom_y = 552  # 写真がない場合の初期値
-    if source_img_bytes:
+    
+    # サーバー上の一時保存ファイルパスから読み込みを試みる
+    if source_img_path and os.path.exists(source_img_path):
         try:
-            kujira = Image.open(io.BytesIO(source_img_bytes))
+            kujira = Image.open(source_img_path)
             square_size = 550  
             gap = (center_x - square_size) // 2
-            
-            # 正方形にトリミング
             kujira = ImageOps.fit(kujira, (square_size, square_size), Image.Resampling.LANCZOS)
-            
             paste_x = gap  
             paste_y = gap  
             if kujira.mode == 'RGBA':
                 image.paste(kujira, (paste_x, paste_y), mask=kujira)
             else:
                 image.paste(kujira, (paste_x, paste_y))
-                
-            # 写真の枠線
             border_offset = 2
             draw.rectangle(
                 [paste_x - border_offset, paste_y - border_offset, 
@@ -47,12 +45,35 @@ def generate_l_size_image(
             )
             photo_bottom_y = paste_y + kujira.height + border_offset
         except Exception as e:
-            print(f"画像配置エラー: {e}")
+            print(f"画像パス配置エラー: {e}")
+            pass
+            
+    # バイトデータから直接読み込みを試みる（予備ルート）
+    elif source_img_bytes:
+        try:
+            kujira = Image.open(io.BytesIO(source_img_bytes))
+            square_size = 550  
+            gap = (center_x - square_size) // 2
+            kujira = ImageOps.fit(kujira, (square_size, square_size), Image.Resampling.LANCZOS)
+            paste_x = gap  
+            paste_y = gap  
+            if kujira.mode == 'RGBA':
+                image.paste(kujira, (paste_x, paste_y), mask=kujira)
+            else:
+                image.paste(kujira, (paste_x, paste_y))
+            border_offset = 2
+            draw.rectangle(
+                [paste_x - border_offset, paste_y - border_offset, 
+                 paste_x + kujira.width + border_offset, paste_y + kujira.height + border_offset], 
+                outline=(0, 0, 0), width=3
+            )
+            photo_bottom_y = paste_y + kujira.height + border_offset
+        except Exception as e:
+            print(f"画像バイト配置エラー: {e}")
             pass
 
-    # 3. ★【フォント対策】同じフォルダに置いた「font.ttf」を最優先で確実に読み込む
+    # 3. フォント対策（ローカルのフォント、または同じフォルダの font.ttf を確実に読み込む）
     font_path = "font.ttf"
-    
     try:
         if os.path.exists(font_path):
             font1 = ImageFont.truetype(font_path, 40)
@@ -62,7 +83,6 @@ def generate_l_size_image(
             font_bottom_right2 = ImageFont.truetype(font_path, 35) 
             font_inside_box = ImageFont.truetype(font_path, 28)
         else:
-            # サーバー内に奇跡的に標準フォントがあれば読み込む予備処理
             fallback_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
             if os.path.exists(fallback_path):
                 font1 = ImageFont.truetype(fallback_path, 40)
@@ -74,15 +94,13 @@ def generate_l_size_image(
             else:
                 raise IOError("フォントファイルが見つかりません")
     except Exception as e:
-        print(f"フォント読み込み失敗、システムデフォルトを適用: {e}")
+        print(f"フォント適用フォールバック: {e}")
         font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
 
-    # 4. サイズ取得（getmaskから安全に幅・高さを取得）
+    # 4. サイズ取得（getmaskから安全に高さを取得）
     def get_font_height(font, text):
-        try:
-            return font.getmask(text).size[1]
-        except:
-            return 35
+        try: return font.getmask(text).size
+        except: return 35
 
     h1 = get_font_height(font1, text_line1 if text_line1 else "A")
     h2 = get_font_height(font2, text_line2 if text_line2 else "A")
@@ -133,7 +151,7 @@ def generate_l_size_image(
     box_y2 = photo_bottom_y
     draw.rectangle([box_x1, box_y1, box_x2, box_y2], outline=(0, 0, 0), width=3)
 
-    # 8. 右側：備考テキスト
+    # 8. 右側：備考テキスト（改行対応）
     inside_text_y = box_y1 + 25
     if notes_text:
         for line in notes_text.splitlines():
@@ -208,7 +226,6 @@ def main(page: ft.Page):
 
     def update_preview(e=None):
         """入力値を読み取って画像を生成し、プレビューを更新する関数"""
-        # ★ [修正] 引数の名前を前半と完全に一致する 'source_img_path' に統一しました
         img_bytes = generate_l_size_image(
             qr_url=tf_url.value,
             text_line1=tf_line1.value,
@@ -226,11 +243,10 @@ def main(page: ft.Page):
     # 選択された画像ファイルをFletのアップロード機能でサーバーへ安全に送信する処理
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
-            file_info = e.files
+            file_info = e.files[0]
             selected_image_name.value = f"読み込み中: {file_info.name} ..."
             page.update()
             
-            # FletのWEB標準アップロード用URLを取得して転送を実行
             upload_url = page.get_upload_url(file_info.name, 600)
             if upload_url:
                 file_picker.upload_files([
@@ -243,7 +259,6 @@ def main(page: ft.Page):
     # アップロード完了後にトリガーされ、保存先パスを Pillow へ引き渡す関数
     def on_upload_progress(e: ft.FilePickerUploadEvent):
         if e.status == ft.FilePickerStatus.COMPLETED:
-            # Flet WEBのアップロード先デフォルトフォルダ（uploads）からファイルを特定
             target_path = os.path.join("uploads", e.file_name)
             if os.path.exists(target_path):
                 uploaded_image_path.current = target_path
@@ -264,7 +279,6 @@ def main(page: ft.Page):
 
     # ブラウザ側でダウンロードを強制させる処理
     def save_image_file(e):
-        # ★ [修正] こちらも引数の名前を 'source_img_path' に統一しました
         img_bytes = generate_l_size_image(
             qr_url=tf_url.value,
             text_line1=tf_line1.value,
@@ -363,4 +377,3 @@ if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8550))
     ft.app(target=main, host="0.0.0.0", view=ft.AppView.WEB_BROWSER, port=port, upload_dir="uploads")
-
