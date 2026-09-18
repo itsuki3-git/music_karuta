@@ -11,7 +11,7 @@ def generate_l_size_image(
     notes_text, source_img_path=None
 ):
     """
-    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（Webサーバー対応・クラッシュ防止版）
+    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（タプル引き算バグを完全解消）
     """
     width = 1500
     height = 1051
@@ -51,18 +51,14 @@ def generate_l_size_image(
         except Exception:
             pass
 
-    # 3. ★【Webサーバー最適化】フォント読み込みのクラッシュ対策
-    # RenderのLinux環境でも絶対にエラーを吐かないフォールバック構造にします
+    # 3. Webサーバー対応のフォント読み込み構造
     font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = None
-
-    # 各OSの標準フォントパス候補
     font_paths = [
-        "msgothic.ttc",  # Windows (ローカル用)
-        "/System/Library/Fonts/FontsAvailableAtRuntime/HiraginoSans-W3.ttc",  # Mac (ローカル用)
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux / Renderサーバー用標準
-        "/usr/share/fonts/fonts-dejavu/DejaVuSans.ttf"      # Linux 候補2
+        "msgothic.ttc",
+        "/System/Library/Fonts/FontsAvailableAtRuntime/HiraginoSans-W3.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/fonts-dejavu/DejaVuSans.ttf"
     ]
-
     for p in font_paths:
         if os.path.exists(p):
             try:
@@ -75,15 +71,13 @@ def generate_l_size_image(
                 break
             except Exception:
                 pass
-
-    # すべて失敗した場合はPillowのデフォルトフォント（文字サイズ固定）を強制適用してクラッシュを防ぐ
     if font1 is None:
         font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
 
-    # 4. サイズ取得
-    h1 = font1.getbbox(text_line1) - font1.getbbox(text_line1) if text_line1 else 40
-    h2 = font2.getbbox(text_line2) - font2.getbbox(text_line2) if text_line2 else 30
-    single_h = font_bottom_right2.getbbox("作") - font_bottom_right2.getbbox("作")
+    # 4. ★[完全修正] getmask()から安全に行の高さをダイレクトに取得（引き算そのものを無くしました）
+    h1 = font1.getmask(text_line1 if text_line1 else "A").size[1]
+    h2 = font2.getmask(text_line2 if text_line2 else "A").size[1]
+    single_h = font_bottom_right2.getmask("作").size[1]
     
     line_spacing = 15
     
@@ -193,7 +187,6 @@ def generate_l_size_image(
     image.save(img_byte_arr, format='JPEG', quality=95)
     return img_byte_arr.getvalue()
 
-
 import base64
 
 def main(page: ft.Page):
@@ -240,7 +233,7 @@ def main(page: ft.Page):
     # ファイルピッカー（画像選択用）
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
-            selected_image_path.value = e.files[0].path
+            selected_image_path.value = e.files.path
             selected_image_path.italic = False
             update_preview()
         page.update()
@@ -296,11 +289,18 @@ def main(page: ft.Page):
                 ft.Container(tf_arranger, col={"xs": 4, "sm": 4}),
             ]),
             
-            ft.Divider(height=30),
+            # ★ [修正] エラー原因になる不正な引数を完全に排除し、安全な区切り線と空白に修正しました
+            ft.Container(height=10),
+            ft.Divider(thickness=1),  
+            ft.Container(height=10),
+            
             ft.Text("備考欄設定", size=20, weight=ft.FontWeight.BOLD),
             tf_notes,
             
-            ft.Divider(height=30),
+            ft.Container(height=10),
+            ft.Divider(thickness=1),
+            ft.Container(height=10),
+            
             # プレビュー表示エリア
             ft.Text("完成プレビュー", size=20, weight=ft.FontWeight.BOLD),
             ft.Container(
@@ -313,7 +313,10 @@ def main(page: ft.Page):
                 aspect_ratio=1.42  
             ),
             ft.Text("※入力すると自動でプレビューが更新されます。", size=12, color="black54"),
-            ft.Divider(height=30),
+            
+            ft.Container(height=10),
+            ft.Divider(thickness=1),
+            ft.Container(height=10),
             
             # 保存ボタン
             ft.ElevatedButton(
@@ -323,7 +326,6 @@ def main(page: ft.Page):
                 style=ft.ButtonStyle(bgcolor="blue", color="white"),
                 width=float("inf")
             ),
-            # ★ [修正] エラーの出る VerticalDivider を廃止し、安全な空白コンテナに変更しました
             ft.Container(height=40) 
         ],
         spacing=15
@@ -336,6 +338,7 @@ def main(page: ft.Page):
             padding=10
         )
     )
+
 
 if __name__ == "__main__":
     import os
