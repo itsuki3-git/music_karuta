@@ -200,7 +200,7 @@ def main(page: ft.Page):
     page.padding = 10
     page.scroll = ft.ScrollMode.ALWAYS 
 
-    # ★ブラウザ上の仮想メモリに選択した画像を直接保持する変数（Bytes型）
+    # ブラウザ上の仮想メモリに選択した画像を直接保持する変数（Bytes型）
     uploaded_image_bytes = ft.Ref[bytes]()
     selected_image_name = ft.Text("画像が選択されていません (デフォルト白地)", italic=True, size=12)
 
@@ -235,22 +235,25 @@ def main(page: ft.Page):
         preview_img.src_base64 = base64.b64encode(img_bytes).decode("utf-8")
         page.update()
 
-    # ★【画像バグ完全修正】サーバーを介さず、ブラウザ上の生データ(bytes)を一発で取得
+    # ★【画像バグ完全修正】Web環境で選択されたファイルデータを確実にバイナリとして吸い出す処理
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
-            file_info = e.files[0]  # 選択された1枚目のファイルオブジェクト
+            file_info = e.files[0]  # 1枚目のファイルを指定
+            selected_image_name.value = f"選択中: {file_info.name}"
+            selected_image_name.italic = False
             
-            # ブラウザ上で吸い上げたバイトデータを直接Pillowの引数へ渡す
-            if file_info.bytes:
-                uploaded_image_bytes.current = file_info.bytes
-                selected_image_name.value = f"選択中: {file_info.name}"
-                selected_image_name.italic = False
-                update_preview()
+            # ローカル環境（PC実行などパスがある場合）
+            if file_info.path and os.path.exists(file_info.path):
+                with open(file_info.path, "rb") as f:
+                    uploaded_image_bytes.current = f.read()
+            # ★ Web環境（スマホブラウザ等、パスを隠されてbytesで取得する場合）
             else:
-                selected_image_name.value = "画像の読み込みに失敗しました"
+                uploaded_image_bytes.current = file_info.bytes
                 
+            update_preview()
         page.update()
 
+    # ★ [修正] Fletの仕様に合わせ、Webアプリで確実に選択データをトリガーさせるため、ピッカーを定義
     file_picker = ft.FilePicker(on_result=pick_files_result)
     page.overlay.append(file_picker)
 
@@ -276,7 +279,6 @@ def main(page: ft.Page):
         filename = f"{tf_line1.value}.jpg" if tf_line1.value else "print_photo.jpg"
         b64_str = base64.b64encode(img_bytes).decode('utf-8')
         
-        # モバイルブラウザ(Safari/Chrome)でも確実に保存が走る強制展開コード
         page.launch_url(
             f"data:image/jpeg;base64,{b64_str}",
             web_window_name="_self"
