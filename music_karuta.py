@@ -208,6 +208,7 @@ def main(page: ft.Page):
 
     def update_preview(e=None):
         """入力値を読み取って画像を生成し、プレビューを更新する関数"""
+        # ★ [修正] 引数の名前を前半と完全に一致する 'source_img_path' に統一しました
         img_bytes = generate_l_size_image(
             qr_url=tf_url.value,
             text_line1=tf_line1.value,
@@ -222,10 +223,10 @@ def main(page: ft.Page):
         preview_img.src_base64 = base64.b64encode(img_bytes).decode("utf-8")
         page.update()
 
-    # ★【画像のWeb反映対応】選択された画像ファイルをFletのアップロード機能でサーバーへ安全に送信する処理
+    # 選択された画像ファイルをFletのアップロード機能でサーバーへ安全に送信する処理
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
-            file_info = e.files[0]
+            file_info = e.files
             selected_image_name.value = f"読み込み中: {file_info.name} ..."
             page.update()
             
@@ -239,7 +240,7 @@ def main(page: ft.Page):
                     )
                 ])
 
-    # ★アップロード完了後にトリガーされ、保存先パスを Pillow へ引き渡す関数
+    # アップロード完了後にトリガーされ、保存先パスを Pillow へ引き渡す関数
     def on_upload_progress(e: ft.FilePickerUploadEvent):
         if e.status == ft.FilePickerStatus.COMPLETED:
             # Flet WEBのアップロード先デフォルトフォルダ（uploads）からファイルを特定
@@ -263,6 +264,7 @@ def main(page: ft.Page):
 
     # ブラウザ側でダウンロードを強制させる処理
     def save_image_file(e):
+        # ★ [修正] こちらも引数の名前を 'source_img_path' に統一しました
         img_bytes = generate_l_size_image(
             qr_url=tf_url.value,
             text_line1=tf_line1.value,
@@ -278,7 +280,6 @@ def main(page: ft.Page):
         filename = f"{tf_line1.value}.jpg" if tf_line1.value else "print_photo.jpg"
         b64_str = base64.b64encode(img_bytes).decode('utf-8')
         
-        # スマホやPCのブラウザに嫌われない、最も互換性の高いバイナリ強制保存形式
         page.launch_url(
             f"data:image/jpeg;base64,{b64_str}",
             web_window_name="_self"
@@ -358,9 +359,8 @@ def main(page: ft.Page):
         )
     )
 
-# RenderのWEBポートに最適化して起動
 if __name__ == "__main__":
+    import os
     port = int(os.getenv("PORT", 8550))
-    # ★WEB上でファイルのアップロードを受け付けるために、uploadsの保存フォルダ（upload_dir）を指定して起動します
     ft.app(target=main, host="0.0.0.0", view=ft.AppView.WEB_BROWSER, port=port, upload_dir="uploads")
 
