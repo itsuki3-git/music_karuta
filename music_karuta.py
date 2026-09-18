@@ -187,29 +187,30 @@ def generate_l_size_image(
 
 import base64
 
-
 def main(page: ft.Page):
     page.title = "L判写真ジェネレーター"
-    page.window_width = 800
-    page.window_height = 950
     page.theme_mode = ft.ThemeMode.LIGHT
+    
+    # ★スマホ表示向けに画面の余白やスクロール設定を最適化
+    page.padding = 10
+    page.scroll = ft.ScrollMode.ALWAYS 
 
     selected_image_path = ft.Text("画像が選択されていません (デフォルト白地)", italic=True, size=12)
 
-    # フォームの各テキスト入力フィールド
-    tf_url = ft.TextField(label="QRコードのURL")
-    tf_line1 = ft.TextField(label="曲名")
-    tf_line2 = ft.TextField(label="アーティスト名")
-    tf_date = ft.TextField(label="リリース年月日")
-    tf_lyricist = ft.TextField(label="作詞")
-    tf_composer = ft.TextField(label="作曲")
-    tf_arranger = ft.TextField(label="編曲")
+    # フォームの各テキスト入力フィールド（横幅いっぱいに広がるよう調整）
+    tf_url = ft.TextField(label="QRコードのURL", expand=True)
+    tf_line1 = ft.TextField(label="曲名", expand=True)
+    tf_line2 = ft.TextField(label="アーティスト名", expand=True)
+    tf_date = ft.TextField(label="リリース年月日", expand=True)
+    tf_lyricist = ft.TextField(label="作詞", expand=True)
+    tf_composer = ft.TextField(label="作曲", expand=True)
+    tf_arranger = ft.TextField(label="編曲", expand=True)
+    
+    # 備考欄用（複数行対応）
+    tf_notes = ft.TextField(label="備考内容", multiline=True, min_lines=3, max_lines=6, expand=True)
 
-    # 備考欄用（1つに統合、複数行・改行対応）
-    tf_notes = ft.TextField(label="備考内容", multiline=True, min_lines=3, max_lines=6)
-
-    # プレビュー表示用のImageコンポーネント
-    preview_img = ft.Image(width=600, height=420, fit=ft.ImageFit.CONTAIN)
+    # プレビュー表示用のImageコンポーネント（スマホ画面の幅に自動追従）
+    preview_img = ft.Image(fit=ft.ImageFit.CONTAIN, expand=True)
 
     def update_preview(e=None):
         """入力値を読み取って画像を生成し、プレビューを更新する関数"""
@@ -229,7 +230,6 @@ def main(page: ft.Page):
 
     # ファイルピッカー（画像選択用）
     def pick_files_result(e: ft.FilePickerResultEvent):
-        # ★ [完全修正] e.filesの1番目の要素を指定して .path を正しく取得します
         if e.files and len(e.files) > 0:
             selected_image_path.value = e.files[0].path
             selected_image_path.italic = False
@@ -240,9 +240,7 @@ def main(page: ft.Page):
     page.overlay.append(file_picker)
 
     # すべての入力フィールドの変更イベントを紐付け
-    all_fields = [
-        tf_url, tf_line1, tf_line2, tf_date, tf_lyricist, tf_composer, tf_arranger, tf_notes
-    ]
+    all_fields = [tf_url, tf_line1, tf_line2, tf_date, tf_lyricist, tf_composer, tf_arranger, tf_notes]
     for tf in all_fields:
         tf.on_change = update_preview
 
@@ -266,61 +264,68 @@ def main(page: ft.Page):
     # アプリ起動時に初期プレビューを描画
     update_preview()
 
-    # 全体の要素を縦に並べるための最外枠 Column
+    # ★スマホの縦幅でも押しやすく、はみ出さないようにラップしたレイアウト
     main_layout = ft.Column(
         [
-            ft.Text("楽曲・写真設定", size=18, weight=ft.FontWeight.BOLD),
+            ft.Text("楽曲・写真設定", size=20, weight=ft.FontWeight.BOLD),
             ft.ElevatedButton(
-                "左上の写真を選択...",
-                icon=ft.Icons.IMAGE,
-                on_click=lambda _: file_picker.pick_files(allow_multiple=False,
-                                                          allowed_extensions=["png", "jpg", "jpeg"])
+                "写真を選択...", 
+                icon=ft.Icons.IMAGE, 
+                on_click=lambda _: file_picker.pick_files(allow_multiple=False, allowed_extensions=["png", "jpg", "jpeg"]),
+                width=float("inf")  # ボタンを画面横幅いっぱいに広げてスマホで押しやすく
             ),
             selected_image_path,
             tf_url,
             tf_line1,
             tf_line2,
             tf_date,
-            ft.Row([tf_lyricist, tf_composer, tf_arranger]),
-
-            ft.Divider(height=20),
-            ft.Text("備考欄設定", size=18, weight=ft.FontWeight.BOLD),
+            
+            # 作詞・作曲・編曲をスマホ幅に合わせて綺麗に自動折り返し（RowからResponsiveRowに改良）
+            ft.ResponsiveRow([
+                ft.Container(tf_lyricist, col={"xs": 4, "sm": 4}),
+                ft.Container(tf_composer, col={"xs": 4, "sm": 4}),
+                ft.Container(tf_arranger, col={"xs": 4, "sm": 4}),
+            ]),
+            
+            ft.Divider(height=30),
+            ft.Text("備考欄設定", size=20, weight=ft.FontWeight.BOLD),
             tf_notes,
-
-            ft.Divider(height=20),
-            # プレビュー表示エリア
-            ft.Text("完成プレビュー（L判比率）", size=18, weight=ft.FontWeight.BOLD),
+            
+            ft.Divider(height=30),
+            # プレビュー表示エリア（スマホ画面幅に綺麗に収まるカード風コンテナ）
+            ft.Text("完成プレビュー", size=20, weight=ft.FontWeight.BOLD),
             ft.Container(
-                content=preview_img,
-                border=ft.border.all(1, "black26"),
-                border_radius=4,
-                padding=10,
+                content=preview_img, 
+                border=ft.border.all(1, "black26"), 
+                border_radius=8, 
+                padding=5, 
                 bgcolor="grey50",
-                alignment=ft.alignment.center
+                alignment=ft.alignment.center,
+                aspect_ratio=1.42  # L判の比率（1500x1051）に近い比率に保ってスマホでの表示を最適化
             ),
-            ft.Text("※文字入力を検知して自動でプレビューが更新されます。", size=12, color="black54"),
-            ft.Divider(height=20),
-
-            # 書き出しボタン
+            ft.Text("※入力すると自動でプレビューが更新されます。", size=12, color="black54"),
+            ft.Divider(height=30),
+            
+            # 保存ボタン（画面いっぱいに広げてタップしやすく）
             ft.ElevatedButton(
-                "高画質JPEGを書き出す",
-                icon=ft.Icons.SAVE,
-                on_click=save_image_file,
-                style=ft.ButtonStyle(bgcolor="blue", color="white")
+                "高画質JPEGを書き出す", 
+                icon=ft.Icons.SAVE, 
+                on_click=save_image_file, 
+                style=ft.ButtonStyle(bgcolor="blue", color="white"),
+                width=float("inf")
             ),
+            ft.VerticalDivider(height=40) # 一番下の押しやすさのための余白
         ],
-        scroll=ft.ScrollMode.ALWAYS,
-        expand=True
+        spacing=15
     )
 
+    # 画面全体を包むコンテナ
     page.add(
         ft.Container(
             content=main_layout,
-            padding=20,
-            expand=True
+            padding=10
         )
     )
-
 
 if __name__ == "__main__":
     import os
