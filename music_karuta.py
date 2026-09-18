@@ -183,12 +183,12 @@ def main(page: ft.Page):
     page.title = "L判写真ジェネレーター"
     page.theme_mode = ft.ThemeMode.LIGHT
     
-    # スマホ表示向けに画面の余白やスクロール設定を最適化
+    # スマホ表示向けに余白やスクロール設定を最適化
     page.padding = 10
     page.scroll = ft.ScrollMode.ALWAYS 
 
-    # 選択された画像のバイトデータを一時保存する変数
-    uploaded_image_bytes = ft.Ref[bytes]()
+    # サーバー側の一時保存パスを管理するオブジェクト
+    uploaded_image_path = ft.Ref[str]()
     selected_image_name = ft.Text("画像が選択されていません (デフォルト白地)", italic=True, size=12)
 
     # フォームの各テキスト入力フィールド
@@ -217,40 +217,43 @@ def main(page: ft.Page):
             composer=tf_composer.value,
             arranger=tf_arranger.value,
             notes_text=tf_notes.value,
-            source_img_bytes=uploaded_image_bytes.current if uploaded_image_bytes.current else None
+            source_img_path=uploaded_image_path.current if uploaded_image_path.current else None
         )
         preview_img.src_base64 = base64.b64encode(img_bytes).decode("utf-8")
         page.update()
 
-    # ★【画像反映のバグ修正】Web上で安全にファイルデータ（Bytes）を直接吸い上げる処理
+    # ★【画像のWeb反映対応】選択された画像ファイルをFletのアップロード機能でサーバーへ安全に送信する処理
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
             file_info = e.files[0]
-            selected_image_name.value = f"選択中: {file_info.name}"
-            selected_image_name.italic = False
+            selected_image_name.value = f"読み込み中: {file_info.name} ..."
+            page.update()
             
-            # Webブラウザ環境でファイルの生データを直接取得する
-            if file_info.path is None:  # Webブラウザ環境の場合
-                # Flet Web環境ではクライアント側からデータを安全に読み込みます
-                # ファイルピッカー経由のローカルデータ読み込みに対応
-                import openpyxl # ダミー参照（Webアップロードのトリガー確保用）
-            
-            # 通常、Flet Webではセキュリティ上パスが取れないため、
-            # page.client_storageやローカルピッカーのバイト直接参照(e.files[0]のデータ構造)に依存します。
-            # 今回はWebアプリ上で最も確実に動くよう、FilePickerのファイルのアップロードバッファを利用します。
-            # ローカル実行とWeb実行の互換性を担保
-            if file_info.path and os.path.exists(file_info.path):
-                with open(file_info.path, "rb") as f:
-                    uploaded_image_bytes.current = f.read()
-            else:
-                # ブラウザ上でデータがバッファされている場合の処理（Flet Web標準）
-                # ユーザーがピッカーで選んだデータを更新
-                pass
-                
-            update_preview()
-        page.update()
+            # FletのWEB標準アップロード用URLを取得して転送を実行
+            upload_url = page.get_upload_url(file_info.name, 600)
+            if upload_url:
+                file_picker.upload_files([
+                    ft.FilePickerUploadFile(
+                        file_info.name,
+                        upload_url=upload_url
+                    )
+                ])
 
-    file_picker = ft.FilePicker(on_result=pick_files_result)
+    # ★アップロード完了後にトリガーされ、保存先パスを Pillow へ引き渡す関数
+    def on_upload_progress(e: ft.FilePickerUploadEvent):
+        if e.status == ft.FilePickerStatus.COMPLETED:
+            # Flet WEBのアップロード先デフォルトフォルダ（uploads）からファイルを特定
+            target_path = os.path.join("uploads", e.file_name)
+            if os.path.exists(target_path):
+                uploaded_image_path.current = target_path
+                selected_image_name.value = f"選択中: {e.file_name}"
+                update_preview()
+            else:
+                selected_image_name.value = "画像のアップロードに失敗しました"
+            page.update()
+
+    # ファイルピッカーにアップロード完了イベントを紐付け
+    file_picker = ft.FilePicker(on_result=pick_files_result, on_upload=on_upload_progress)
     page.overlay.append(file_picker)
 
     # すべての入力フィールドの変更イベントを紐付け
@@ -258,7 +261,7 @@ def main(page: ft.Page):
     for tf in all_fields:
         tf.on_change = update_preview
 
-    # ★【ダウンロードのバグ修正】ブラウザに拒否されないJavaScriptベースのBlob保存をエミュレート
+    # ブラウザ側でダウンロードを強制させる処理
     def save_image_file(e):
         img_bytes = generate_l_size_image(
             qr_url=tf_url.value,
@@ -269,16 +272,15 @@ def main(page: ft.Page):
             composer=tf_composer.value,
             arranger=tf_arranger.value,
             notes_text=tf_notes.value,
-            source_img_bytes=uploaded_image_bytes.current if uploaded_image_bytes.current else None
+            source_img_path=uploaded_image_path.current if uploaded_image_path.current else None
         )
         
         filename = f"{tf_line1.value}.jpg" if tf_line1.value else "print_photo.jpg"
         b64_str = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Webブラウザの標準機能（aタグ＋download属性）をFletのクライアントスクリプトとして安全に実行
-        # これにより、スマホ（Safari/Chrome）でもブロックされずにカメラロールやダウンロードフォルダへ直接保存が始まります
+        # スマホやPCのブラウザに嫌われない、最も互換性の高いバイナリ強制保存形式
         page.launch_url(
-            f"data:application/octet-stream;base64,{b64_str}",
+            f"data:image/jpeg;base64,{b64_str}",
             web_window_name="_self"
         )
         page.open(ft.SnackBar(ft.Text(f"「{filename}」のダウンロードを開始しました！")))
@@ -356,9 +358,9 @@ def main(page: ft.Page):
         )
     )
 
-
+# RenderのWEBポートに最適化して起動
 if __name__ == "__main__":
-    import os
-    port = int(os.getenv("PORT", 8000))
-    ft.app(target=main, host="0.0.0.0", view=ft.AppView.WEB_BROWSER, port=port)
+    port = int(os.getenv("PORT", 8550))
+    # ★WEB上でファイルのアップロードを受け付けるために、uploadsの保存フォルダ（upload_dir）を指定して起動します
+    ft.app(target=main, host="0.0.0.0", view=ft.AppView.WEB_BROWSER, port=port, upload_dir="uploads")
 
