@@ -1,16 +1,18 @@
-import flet as ft
 import os
 import io
+import urllib.request
+import urllib.parse
+import base64
 import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+import flet as ft
 
-# ★ 引数に source_img_path と source_img_bytes の両方を定義し、どちらが送られてきても100%クラッシュしないようにしました
 def generate_l_size_image(
     qr_url, text_line1, text_line2, bottom_text_upper, lyricist, composer, arranger, 
     notes_text, source_img_path=None, source_img_bytes=None
 ):
     """
-    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（Web・サーバー両対応の完全版）
+    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（型エラー完全解消版）
     """
     width = 1500
     height = 1051
@@ -24,7 +26,6 @@ def generate_l_size_image(
     # 2. 左側：正方形写真の加工・配置
     photo_bottom_y = 552  # 写真がない場合の初期値
     
-    # サーバー上の一時保存ファイルパスから読み込みを試みる
     if source_img_path and os.path.exists(source_img_path):
         try:
             kujira = Image.open(source_img_path)
@@ -48,7 +49,6 @@ def generate_l_size_image(
             print(f"画像パス配置エラー: {e}")
             pass
             
-    # バイトデータから直接読み込みを試みる（予備ルート）
     elif source_img_bytes:
         try:
             kujira = Image.open(io.BytesIO(source_img_bytes))
@@ -72,7 +72,7 @@ def generate_l_size_image(
             print(f"画像バイト配置エラー: {e}")
             pass
 
-    # 3. フォント対策（ローカルのフォント、または同じフォルダの font.ttf を確実に読み込む）
+    # 3. フォント対策（同じフォルダの font.ttf を確実に読み込む）
     font_path = "font.ttf"
     try:
         if os.path.exists(font_path):
@@ -97,13 +97,16 @@ def generate_l_size_image(
         print(f"フォント適用フォールバック: {e}")
         font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
 
-    # 4. サイズ取得（getmaskから安全に高さを取得）
+    # 4. ★[完全修正] sizeの2番目の要素[1]を指定して、確実に「高さの数値(int)」を取り出します
     def get_font_height(font, text):
-        try: return font.getmask(text).size
-        except: return 35
+        try:
+            sz = font.getmask(text if text else "A").size
+            return sz[1] if isinstance(sz, tuple) else 35
+        except:
+            return 35
 
-    h1 = get_font_height(font1, text_line1 if text_line1 else "A")
-    h2 = get_font_height(font2, text_line2 if text_line2 else "A")
+    h1 = get_font_height(font1, text_line1)
+    h2 = get_font_height(font2, text_line2)
     single_h = get_font_height(font_bottom_right2, "作")
     
     line_spacing = 15
@@ -377,3 +380,4 @@ if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8550))
     ft.app(target=main, host="0.0.0.0", view=ft.AppView.WEB_BROWSER, port=port, upload_dir="uploads")
+
