@@ -1,3 +1,4 @@
+import flet as ft
 import os
 import io
 import qrcode
