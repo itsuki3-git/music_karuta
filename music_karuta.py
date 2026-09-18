@@ -9,10 +9,10 @@ import flet as ft
 
 def generate_l_size_image(
     qr_url, text_line1, text_line2, bottom_text_upper, lyricist, composer, arranger, 
-    notes_text, source_img_path=None, source_img_bytes=None
+    notes_text, source_img_bytes=None
 ):
     """
-    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（型エラー完全解消版）
+    入力値（ブラウザから直接届いた画像データを含む）から高解像度のL判画像を生成し、Bytesデータで返す関数
     """
     width = 1500
     height = 1051
@@ -23,44 +23,25 @@ def generate_l_size_image(
     center_x = width // 2
     draw.line((center_x, 0, center_x, height), fill=(0, 0, 0), width=5)
 
-    # 2. 左側：正方形写真の加工・配置
+    # 2. 左側：正方形写真の加工・配置（★サーバーを介さず、ブラウザの画像データを直接復元）
     photo_bottom_y = 552  # 写真がない場合の初期値
-    
-    if source_img_path and os.path.exists(source_img_path):
-        try:
-            kujira = Image.open(source_img_path)
-            square_size = 550  
-            gap = (center_x - square_size) // 2
-            kujira = ImageOps.fit(kujira, (square_size, square_size), Image.Resampling.LANCZOS)
-            paste_x = gap  
-            paste_y = gap  
-            if kujira.mode == 'RGBA':
-                image.paste(kujira, (paste_x, paste_y), mask=kujira)
-            else:
-                image.paste(kujira, (paste_x, paste_y))
-            border_offset = 2
-            draw.rectangle(
-                [paste_x - border_offset, paste_y - border_offset, 
-                 paste_x + kujira.width + border_offset, paste_y + kujira.height + border_offset], 
-                outline=(0, 0, 0), width=3
-            )
-            photo_bottom_y = paste_y + kujira.height + border_offset
-        except Exception as e:
-            print(f"画像パス配置エラー: {e}")
-            pass
-            
-    elif source_img_bytes:
+    if source_img_bytes:
         try:
             kujira = Image.open(io.BytesIO(source_img_bytes))
             square_size = 550  
             gap = (center_x - square_size) // 2
+            
+            # 正方形にトリミング
             kujira = ImageOps.fit(kujira, (square_size, square_size), Image.Resampling.LANCZOS)
+            
             paste_x = gap  
             paste_y = gap  
             if kujira.mode == 'RGBA':
                 image.paste(kujira, (paste_x, paste_y), mask=kujira)
             else:
                 image.paste(kujira, (paste_x, paste_y))
+                
+            # 写真の枠線
             border_offset = 2
             draw.rectangle(
                 [paste_x - border_offset, paste_y - border_offset, 
@@ -69,7 +50,7 @@ def generate_l_size_image(
             )
             photo_bottom_y = paste_y + kujira.height + border_offset
         except Exception as e:
-            print(f"画像バイト配置エラー: {e}")
+            print(f"画像配置エラー: {e}")
             pass
 
     # 3. フォント対策（同じフォルダの font.ttf を確実に読み込む）
@@ -97,7 +78,7 @@ def generate_l_size_image(
         print(f"フォント適用フォールバック: {e}")
         font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
 
-    # 4. ★[完全修正] sizeの2番目の要素[1]を指定して、確実に「高さの数値(int)」を取り出します
+    # 4. サイズ取得（安全なメソッドを使用）
     def get_font_height(font, text):
         try:
             sz = font.getmask(text if text else "A").size
@@ -198,8 +179,6 @@ def generate_l_size_image(
     image.save(img_byte_arr, format='JPEG', quality=95)
     return img_byte_arr.getvalue()
 
-import base64
-
 def main(page: ft.Page):
     page.title = "L判写真ジェネレーター"
     page.theme_mode = ft.ThemeMode.LIGHT
@@ -208,8 +187,8 @@ def main(page: ft.Page):
     page.padding = 10
     page.scroll = ft.ScrollMode.ALWAYS 
 
-    # サーバー側の一時保存パスを管理するオブジェクト
-    uploaded_image_path = ft.Ref[str]()
+    # 選択された画像のバイトデータをブラウザ内に安全に一時保持する変数
+    uploaded_image_bytes = ft.Ref[bytes]()
     selected_image_name = ft.Text("画像が選択されていません (デフォルト白地)", italic=True, size=12)
 
     # フォームの各テキスト入力フィールド
@@ -238,41 +217,32 @@ def main(page: ft.Page):
             composer=tf_composer.value,
             arranger=tf_arranger.value,
             notes_text=tf_notes.value,
-            source_img_path=uploaded_image_path.current if uploaded_image_path.current else None
+            source_img_bytes=uploaded_image_bytes.current if uploaded_image_bytes.current else None
         )
         preview_img.src_base64 = base64.b64encode(img_bytes).decode("utf-8")
         page.update()
 
-    # 選択された画像ファイルをFletのアップロード機能でサーバーへ安全に送信する処理
+    # ★【画像のWeb反映対応】サーバーへの転送処理（upload_files）を完全に廃止。
+    # ブラウザの仮想メモリ上の生データ（Bytes）をそのままFletへ直接引き渡す処理に変更しました。
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
             file_info = e.files[0]
-            selected_image_name.value = f"読み込み中: {file_info.name} ..."
-            page.update()
+            selected_image_name.value = f"選択中: {file_info.name}"
+            selected_image_name.italic = False
             
-            upload_url = page.get_upload_url(file_info.name, 600)
-            if upload_url:
-                file_picker.upload_files([
-                    ft.FilePickerUploadFile(
-                        file_info.name,
-                        upload_url=upload_url
-                    )
-                ])
-
-    # アップロード完了後にトリガーされ、保存先パスを Pillow へ引き渡す関数
-    def on_upload_progress(e: ft.FilePickerUploadEvent):
-        if e.status == ft.FilePickerStatus.COMPLETED:
-            target_path = os.path.join("uploads", e.file_name)
-            if os.path.exists(target_path):
-                uploaded_image_path.current = target_path
-                selected_image_name.value = f"選択中: {e.file_name}"
-                update_preview()
+            # Flet Web環境特有の「ブラウザ内バイナリ一時キャッシュ」から直でデータを読み込む
+            if file_info.bytes:
+                uploaded_image_bytes.current = file_info.bytes
             else:
-                selected_image_name.value = "画像のアップロードに失敗しました"
-            page.update()
+                # 万が一ローカル環境で動かした際への互換性も担保
+                if file_info.path and os.path.exists(file_info.path):
+                    with open(file_info.path, "rb") as f:
+                        uploaded_image_bytes.current = f.read()
+                        
+            update_preview()
+        page.update()
 
-    # ファイルピッカーにアップロード完了イベントを紐付け
-    file_picker = ft.FilePicker(on_result=pick_files_result, on_upload=on_upload_progress)
+    file_picker = ft.FilePicker(on_result=pick_files_result)
     page.overlay.append(file_picker)
 
     # すべての入力フィールドの変更イベントを紐付け
@@ -291,12 +261,13 @@ def main(page: ft.Page):
             composer=tf_composer.value,
             arranger=tf_arranger.value,
             notes_text=tf_notes.value,
-            source_img_path=uploaded_image_path.current if uploaded_image_path.current else None
+            source_img_bytes=uploaded_image_bytes.current if uploaded_image_bytes.current else None
         )
         
         filename = f"{tf_line1.value}.jpg" if tf_line1.value else "print_photo.jpg"
         b64_str = base64.b64encode(img_bytes).decode('utf-8')
         
+        # 確実にスマートフォン側へダウンロードを開始させるバイナリストリーム強制展開
         page.launch_url(
             f"data:image/jpeg;base64,{b64_str}",
             web_window_name="_self"
@@ -376,8 +347,8 @@ def main(page: ft.Page):
         )
     )
 
+# RenderのWEBポートに最適化して起動
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8550))
-    ft.app(target=main, host="0.0.0.0", view=ft.AppView.WEB_BROWSER, port=port, upload_dir="uploads")
-
+    ft.app(target=main, host="0.0.0.0", view=ft.AppView.WEB_BROWSER, port=port)
