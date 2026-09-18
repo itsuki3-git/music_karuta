@@ -6,19 +6,18 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import flet as ft
 
-
 def generate_l_size_image(
-        qr_url, text_line1, text_line2, bottom_text_upper, lyricist, composer, arranger,
-        notes_text, source_img_path=None
+    qr_url, text_line1, text_line2, bottom_text_upper, lyricist, composer, arranger, 
+    notes_text, source_img_path=None
 ):
     """
-    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数
+    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（Webサーバー対応・クラッシュ防止版）
     """
     width = 1500
     height = 1051
     image = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(image)
-
+    
     # 1. 中央の縦の黒線
     center_x = width // 2
     draw.line((center_x, 0, center_x, height), fill=(0, 0, 0), width=5)
@@ -28,58 +27,70 @@ def generate_l_size_image(
     if source_img_path and os.path.exists(source_img_path):
         try:
             kujira = Image.open(source_img_path)
-            square_size = 550
+            square_size = 550  
             gap = (center_x - square_size) // 2
-
+            
             # 正方形にトリミング
             kujira = ImageOps.fit(kujira, (square_size, square_size), Image.Resampling.LANCZOS)
-
-            paste_x = gap
-            paste_y = gap
+            
+            paste_x = gap  
+            paste_y = gap  
             if kujira.mode == 'RGBA':
                 image.paste(kujira, (paste_x, paste_y), mask=kujira)
             else:
                 image.paste(kujira, (paste_x, paste_y))
-
+                
             # 写真の枠線
             border_offset = 2
             draw.rectangle(
-                [paste_x - border_offset, paste_y - border_offset,
-                 paste_x + kujira.width + border_offset, paste_y + kujira.height + border_offset],
+                [paste_x - border_offset, paste_y - border_offset, 
+                 paste_x + kujira.width + border_offset, paste_y + kujira.height + border_offset], 
                 outline=(0, 0, 0), width=3
             )
             photo_bottom_y = paste_y + kujira.height + border_offset
         except Exception:
             pass
 
-    # 3. フォントの設定
-    font_path = "msgothic.ttc"
-    if os.name != 'nt':
-        font_path = "/System/Library/Fonts/FontsAvailableAtRuntime/HiraginoSans-W3.ttc"
-        if not os.path.exists(font_path):
-            font_path = "Arial.ttf"
+    # 3. ★【Webサーバー最適化】フォント読み込みのクラッシュ対策
+    # RenderのLinux環境でも絶対にエラーを吐かないフォールバック構造にします
+    font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = None
 
-    try:
-        font1 = ImageFont.truetype(font_path, 40)
-        font2 = ImageFont.truetype(font_path, 30)
-        font_notes = ImageFont.truetype(font_path, 35)
-        font_bottom_right1 = ImageFont.truetype(font_path, 52)
-        font_bottom_right2 = ImageFont.truetype(font_path, 35)
-        font_inside_box = ImageFont.truetype(font_path, 28)
-    except IOError:
+    # 各OSの標準フォントパス候補
+    font_paths = [
+        "msgothic.ttc",  # Windows (ローカル用)
+        "/System/Library/Fonts/FontsAvailableAtRuntime/HiraginoSans-W3.ttc",  # Mac (ローカル用)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux / Renderサーバー用標準
+        "/usr/share/fonts/fonts-dejavu/DejaVuSans.ttf"      # Linux 候補2
+    ]
+
+    for p in font_paths:
+        if os.path.exists(p):
+            try:
+                font1 = ImageFont.truetype(p, 40)
+                font2 = ImageFont.truetype(p, 30)
+                font_notes = ImageFont.truetype(p, 35) 
+                font_bottom_right1 = ImageFont.truetype(p, 52) 
+                font_bottom_right2 = ImageFont.truetype(p, 35) 
+                font_inside_box = ImageFont.truetype(p, 28)
+                break
+            except Exception:
+                pass
+
+    # すべて失敗した場合はPillowのデフォルトフォント（文字サイズ固定）を強制適用してクラッシュを防ぐ
+    if font1 is None:
         font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
 
-    # 4. サイズ取得（安全なメソッドを使用）
-    h1 = font1.getbbox(text_line1)[3] - font1.getbbox(text_line1)[1] if text_line1 else 40
-    h2 = font2.getbbox(text_line2)[3] - font2.getbbox(text_line2)[1] if text_line2 else 30
-    single_h = font_bottom_right2.getbbox("作")[3] - font_bottom_right2.getbbox("作")[1]
-
+    # 4. サイズ取得
+    h1 = font1.getbbox(text_line1) - font1.getbbox(text_line1) if text_line1 else 40
+    h2 = font2.getbbox(text_line2) - font2.getbbox(text_line2) if text_line2 else 30
+    single_h = font_bottom_right2.getbbox("作") - font_bottom_right2.getbbox("作")
+    
     line_spacing = 15
-
+    
     # 日付位置の基準
     block_start_y = photo_bottom_y + ((height - 20 - 25 - 70) - photo_bottom_y) // 2 - ((h1 + line_spacing + 30) // 2)
     credit_start_y = block_start_y + h1 + line_spacing + 10
-
+    
     # 再生バーの位置を作詞の1行目とぴったり一致させる
     player_center_y = credit_start_y + (single_h // 2)
 
@@ -89,11 +100,10 @@ def generate_l_size_image(
         draw.text((center_x // 2 - (w1 // 2), block_start_y), text_line1, fill=(0, 0, 0), font=font1)
     if text_line2:
         w2 = int(draw.textlength(text_line2, font=font2))
-        draw.text((center_x // 2 - (w2 // 2), block_start_y + h1 + line_spacing), text_line2, fill=(0, 0, 0),
-                  font=font2)
+        draw.text((center_x // 2 - (w2 // 2), block_start_y + h1 + line_spacing), text_line2, fill=(0, 0, 0), font=font2)
 
     # 6. 左側：音楽再生マークの描画
-    bar_w = 450
+    bar_w = 450            
     bar_x1 = center_x // 2 - (bar_w // 2)
     bar_x2 = center_x // 2 + (bar_w // 2)
     draw.line((bar_x1, player_center_y, bar_x2, player_center_y), fill=(200, 200, 200), width=4)
@@ -102,9 +112,9 @@ def generate_l_size_image(
     draw.ellipse((current_x - 6, player_center_y - 6, current_x + 6, player_center_y + 6), fill=(0, 0, 0))
 
     play_size = 25
-    buttons_y = player_center_y + 70
-    draw.polygon([(center_x // 2 - (play_size // 2), buttons_y - play_size),
-                  (center_x // 2 - (play_size // 2), buttons_y + play_size),
+    buttons_y = player_center_y + 70      
+    draw.polygon([(center_x // 2 - (play_size // 2), buttons_y - play_size), 
+                  (center_x // 2 - (play_size // 2), buttons_y + play_size), 
                   (center_x // 2 + play_size, buttons_y)], fill=(0, 0, 0))
 
     skip_r_x = center_x // 2 + 120
@@ -129,10 +139,10 @@ def generate_l_size_image(
     if notes_text:
         for line in notes_text.splitlines():
             draw.text((box_x1 + 25, inside_text_y), line, fill=(50, 50, 50), font=font_inside_box)
-            inside_text_y += 45
+            inside_text_y += 45 
 
-            # 9. 右側：URLから本物のQRコードを作成
-    qr_size = 120
+    # 9. 右側：URLから本物のQRコードを作成
+    qr_size = 120  
     qr_x = box_x2 - qr_size - 15
     qr_y = box_y2 - qr_size - 15
     if qr_url:
@@ -142,7 +152,7 @@ def generate_l_size_image(
             qr.make(fit=True)
             real_qr = qr.make_image(fill_color="black", back_color="white").convert("RGB")
             real_qr = real_qr.resize((qr_size, qr_size), Image.Resampling.NEAREST)
-
+            
             try:
                 parsed_url = urllib.parse.urlparse(qr_url)
                 domain = parsed_url.netloc if parsed_url.netloc else parsed_url.path.split('/')
@@ -151,12 +161,12 @@ def generate_l_size_image(
                 with urllib.request.urlopen(req, timeout=2) as response:
                     icon_data = response.read()
                 logo = Image.open(io.BytesIO(icon_data)).convert("RGBA")
-                logo_max_size = qr_size // 4
+                logo_max_size = qr_size // 4  
                 logo = logo.resize((logo_max_size, logo_max_size), Image.Resampling.LANCZOS)
                 real_qr.paste(logo, ((qr_size - logo.width) // 2, (qr_size - logo.height) // 2), mask=logo)
             except Exception:
                 pass
-
+                
             image.paste(real_qr, (qr_x, qr_y))
         except Exception:
             pass
@@ -165,8 +175,7 @@ def generate_l_size_image(
     right_area_center_x = center_x + (width - center_x) // 2
     if bottom_text_upper:
         w_upper = int(draw.textlength(bottom_text_upper, font=font_bottom_right1))
-        draw.text((right_area_center_x - (w_upper // 2), block_start_y), bottom_text_upper, fill=(0, 0, 0),
-                  font=font_bottom_right1)
+        draw.text((right_area_center_x - (w_upper // 2), block_start_y), bottom_text_upper, fill=(0, 0, 0), font=font_bottom_right1)
 
     credits = [f"作詞：{lyricist}", f"作曲：{composer}", f"編曲：{arranger}"]
     max_credit_w = 0
@@ -178,7 +187,7 @@ def generate_l_size_image(
     current_credit_y = credit_start_y
     for line in credits:
         draw.text((aligned_credit_x, current_credit_y), line, fill=(0, 0, 0), font=font_bottom_right2)
-        current_credit_y += 45
+        current_credit_y += 45  
 
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='JPEG', quality=95)
