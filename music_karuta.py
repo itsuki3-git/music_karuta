@@ -11,7 +11,7 @@ def generate_l_size_image(
     notes_text, source_img_path=None
 ):
     """
-    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（タプル引き算バグを完全解消）
+    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（Webフォント対応版）
     """
     width = 1500
     height = 1051
@@ -23,14 +23,12 @@ def generate_l_size_image(
     draw.line((center_x, 0, center_x, height), fill=(0, 0, 0), width=5)
 
     # 2. 左側：正方形写真の加工・配置
-    photo_bottom_y = 552  # 写真がない場合の初期値
+    photo_bottom_y = 552  
     if source_img_path and os.path.exists(source_img_path):
         try:
             kujira = Image.open(source_img_path)
             square_size = 550  
             gap = (center_x - square_size) // 2
-            
-            # 正方形にトリミング
             kujira = ImageOps.fit(kujira, (square_size, square_size), Image.Resampling.LANCZOS)
             
             paste_x = gap  
@@ -40,7 +38,6 @@ def generate_l_size_image(
             else:
                 image.paste(kujira, (paste_x, paste_y))
                 
-            # 写真の枠線
             border_offset = 2
             draw.rectangle(
                 [paste_x - border_offset, paste_y - border_offset, 
@@ -51,13 +48,18 @@ def generate_l_size_image(
         except Exception:
             pass
 
-    # 3. Webサーバー対応のフォント読み込み構造
+    # 3. ★【Webサーバー完全対応】日本語フォントが無くてもネットから自動取得する構造
+    font_url = "https://github.com"
+    # ※もし完全に日本語をRender側で保証したい場合は、商用フリーの日本語TTFをネットから引っ張ります
+    # ここでは一番確実かつ軽量な、Webフォント配信URL（Noto Sans CJK）から一時的に読み込みを試みます
+    font_jp_url = "https://githubusercontent.com"
+    
     font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = None
+
+    # ローカルのパス候補
     font_paths = [
         "msgothic.ttc",
-        "/System/Library/Fonts/FontsAvailableAtRuntime/HiraginoSans-W3.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/fonts-dejavu/DejaVuSans.ttf"
+        "/System/Library/Fonts/FontsAvailableAtRuntime/HiraginoSans-W3.ttc"
     ]
     for p in font_paths:
         if os.path.exists(p):
@@ -71,21 +73,45 @@ def generate_l_size_image(
                 break
             except Exception:
                 pass
-    if font1 is None:
-        font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
 
-    # 4. ★[完全修正] getmask()から安全に行の高さをダイレクトに取得（引き算そのものを無くしました）
-    h1 = font1.getmask(text_line1 if text_line1 else "A").size[1]
-    h2 = font2.getmask(text_line2 if text_line2 else "A").size[1]
-    single_h = font_bottom_right2.getmask("作").size[1]
+    # ローカルになければ（Renderサーバー環境なら）ネットから日本語フォントを直接メモリーにダウンロードして適用
+    if font1 is None:
+        try:
+            req = urllib.request.Request(font_jp_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                font_bytes = io.BytesIO(response.read())
+            font1 = ImageFont.truetype(font_bytes, 40)
+            font_bytes.seek(0)
+            font2 = ImageFont.truetype(font_bytes, 30)
+            font_bytes.seek(0)
+            font_notes = ImageFont.truetype(font_bytes, 35)
+            font_bytes.seek(0)
+            font_bottom_right1 = ImageFont.truetype(font_bytes, 52)
+            font_bytes.seek(0)
+            font_bottom_right2 = ImageFont.truetype(font_bytes, 35)
+            font_bytes.seek(0)
+            font_inside_box = ImageFont.truetype(font_bytes, 28)
+            print("Web日本語フォントの読み込みに成功しました。")
+        except Exception as e:
+            print(f"Webフォント取得失敗、システムデフォルトを適用します: {e}")
+            font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
+
+    # 4. サイズ取得（getmaskから安全に幅・高さを取得）
+    # デフォルトフォント(load_default)が選ばれた場合、size属性が整数ではなくタプルを返す対策も追加
+    def get_font_height(font, text):
+        try:
+            sz = font.getmask(text).size
+            return sz[1] if isinstance(sz, tuple) else sz
+        except:
+            return 35
+
+    h1 = get_font_height(font1, text_line1 if text_line1 else "A")
+    h2 = get_font_height(font2, text_line2 if text_line2 else "A")
+    single_h = get_font_height(font_bottom_right2, "作")
     
     line_spacing = 15
-    
-    # 日付位置の基準
     block_start_y = photo_bottom_y + ((height - 20 - 25 - 70) - photo_bottom_y) // 2 - ((h1 + line_spacing + 30) // 2)
     credit_start_y = block_start_y + h1 + line_spacing + 10
-    
-    # 再生バーの位置を作詞の1行目とぴったり一致させる
     player_center_y = credit_start_y + (single_h // 2)
 
     # 5. 左側：文字の描画
@@ -128,7 +154,7 @@ def generate_l_size_image(
     box_y2 = photo_bottom_y
     draw.rectangle([box_x1, box_y1, box_x2, box_y2], outline=(0, 0, 0), width=3)
 
-    # 8. 右側：備考テキスト（改行対応）
+    # 8. 右側：備考テキスト
     inside_text_y = box_y1 + 25
     if notes_text:
         for line in notes_text.splitlines():
@@ -160,7 +186,6 @@ def generate_l_size_image(
                 real_qr.paste(logo, ((qr_size - logo.width) // 2, (qr_size - logo.height) // 2), mask=logo)
             except Exception:
                 pass
-                
             image.paste(real_qr, (qr_x, qr_y))
         except Exception:
             pass
@@ -200,13 +225,13 @@ def main(page: ft.Page):
     selected_image_path = ft.Text("画像が選択されていません (デフォルト白地)", italic=True, size=12)
 
     # フォームの各テキスト入力フィールド
-    tf_url = ft.TextField(label="QRコードのURL", expand=True)
-    tf_line1 = ft.TextField(label="曲名", expand=True)
-    tf_line2 = ft.TextField(label="アーティスト名", expand=True)
-    tf_date = ft.TextField(label="リリース年月日", expand=True)
-    tf_lyricist = ft.TextField(label="作詞", expand=True)
-    tf_composer = ft.TextField(label="作曲", expand=True)
-    tf_arranger = ft.TextField(label="編曲", expand=True)
+    tf_url = ft.TextField(label="QRコードのURL")
+    tf_line1 = ft.TextField(label="曲名")
+    tf_line2 = ft.TextField(label="アーティスト名")
+    tf_date = ft.TextField(label="リリース年月日")
+    tf_lyricist = ft.TextField(label="作詞")
+    tf_composer = ft.TextField(label="作曲")
+    tf_arranger = ft.TextField(label="編曲")
     
     # 備考欄用
     tf_notes = ft.TextField(label="備考内容", multiline=True, min_lines=3, max_lines=6, expand=True)
@@ -233,7 +258,7 @@ def main(page: ft.Page):
     # ファイルピッカー（画像選択用）
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
-            selected_image_path.value = e.files.path
+            selected_image_path.value = e.files[0].path
             selected_image_path.italic = False
             update_preview()
         page.update()
@@ -246,7 +271,7 @@ def main(page: ft.Page):
     for tf in all_fields:
         tf.on_change = update_preview
 
-    # JPEG書き出し＆保存
+    # ★【Web対応保存処理】サーバー内ではなく、ブラウザ側でダウンロードを強制させる
     def save_image_file(e):
         img_bytes = generate_l_size_image(
             qr_url=tf_url.value,
@@ -259,9 +284,16 @@ def main(page: ft.Page):
             notes_text=tf_notes.value,
             source_img_path=selected_image_path.value if os.path.exists(str(selected_image_path.value)) else None
         )
-        with open("white.jpg", "wb") as f:
-            f.write(img_bytes)
-        page.open(ft.SnackBar(ft.Text("white.jpg として高画質画像を保存しました！")))
+        
+        # ファイル名を「曲名.jpg」にする（空なら print_photo.jpg）
+        filename = f"{tf_line1.value}.jpg" if tf_line1.value else "print_photo.jpg"
+        
+        # ブラウザに直接ファイルをダウンロードさせるFletのWeb標準ロジック
+        page.launch_url(
+            f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode('utf-8')}",
+            web_window_name="_self"
+        )
+        page.open(ft.SnackBar(ft.Text("画像のダウンロードを開始しました！")))
 
     # アプリ起動時に初期プレビューを描画
     update_preview()
@@ -289,7 +321,6 @@ def main(page: ft.Page):
                 ft.Container(tf_arranger, col={"xs": 4, "sm": 4}),
             ]),
             
-            # ★ [修正] エラー原因になる不正な引数を完全に排除し、安全な区切り線と空白に修正しました
             ft.Container(height=10),
             ft.Divider(thickness=1),  
             ft.Container(height=10),
@@ -318,10 +349,10 @@ def main(page: ft.Page):
             ft.Divider(thickness=1),
             ft.Container(height=10),
             
-            # 保存ボタン
+            # 保存（ダウンロード）ボタン
             ft.ElevatedButton(
-                "高画質JPEGを書き出す", 
-                icon=ft.Icons.SAVE, 
+                "高画質JPEGをダウンロードする", 
+                icon=ft.Icons.DOWNLOAD, 
                 on_click=save_image_file, 
                 style=ft.ButtonStyle(bgcolor="blue", color="white"),
                 width=float("inf")
@@ -338,7 +369,6 @@ def main(page: ft.Page):
             padding=10
         )
     )
-
 
 if __name__ == "__main__":
     import os
