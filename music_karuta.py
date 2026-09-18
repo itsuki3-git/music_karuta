@@ -12,7 +12,7 @@ def generate_l_size_image(
     notes_text, source_img_bytes=None
 ):
     """
-    入力値（ブラウザから直接届いた画像データを含む）から高解像度のL判画像を生成し、Bytesデータで返す関数
+    入力値から高解像度のL判画像を生成し、Bytesデータで返す関数（レイアウト被り＆Webバグ完全解消版）
     """
     width = 1500
     height = 1051
@@ -23,7 +23,7 @@ def generate_l_size_image(
     center_x = width // 2
     draw.line((center_x, 0, center_x, height), fill=(0, 0, 0), width=5)
 
-    # 2. 左側：正方形写真の加工・配置（★サーバーを介さず、ブラウザの画像データを直接復元）
+    # 2. 左側：正方形写真の加工・配置
     photo_bottom_y = 552  # 写真がない場合の初期値
     if source_img_bytes:
         try:
@@ -78,7 +78,7 @@ def generate_l_size_image(
         print(f"フォント適用フォールバック: {e}")
         font1 = font2 = font_notes = font_bottom_right1 = font_bottom_right2 = font_inside_box = ImageFont.load_default()
 
-    # 4. サイズ取得（安全なメソッドを使用）
+    # 4. サイズ取得（getmaskから安全に高さを取得）
     def get_font_height(font, text):
         try:
             sz = font.getmask(text if text else "A").size
@@ -91,17 +91,26 @@ def generate_l_size_image(
     single_h = get_font_height(font_bottom_right2, "作")
     
     line_spacing = 15
-    block_start_y = photo_bottom_y + ((height - 20 - 25 - 70) - photo_bottom_y) // 2 - ((h1 + line_spacing + 30) // 2)
-    credit_start_y = block_start_y + h1 + line_spacing + 10
-    player_center_y = credit_start_y + (single_h // 2)
+    
+    # ★ 再生バー（横線）の高さを固定軸にして、文字が絶対に被らない下部に配置するよう調整
+    player_center_y = 860  
+    buttons_y = player_center_y + 65      
+
+    # クレジット（作詞）の開始高さを固定
+    credit_start_y = 780
+
+    # 曲名テキストの配置（写真の下端と再生バーの間のエリアに綺麗に収める）
+    total_text_height = h1 + line_spacing + h2
+    text_area_height = (player_center_y - 20) - photo_bottom_y
+    text_block_y = photo_bottom_y + (text_area_height // 2) - (total_text_height // 2)
 
     # 5. 左側：文字の描画
     if text_line1:
         w1 = int(draw.textlength(text_line1, font=font1))
-        draw.text((center_x // 2 - (w1 // 2), block_start_y), text_line1, fill=(0, 0, 0), font=font1)
+        draw.text((center_x // 2 - (w1 // 2), text_block_y), text_line1, fill=(0, 0, 0), font=font1)
     if text_line2:
         w2 = int(draw.textlength(text_line2, font=font2))
-        draw.text((center_x // 2 - (w2 // 2), block_start_y + h1 + line_spacing), text_line2, fill=(0, 0, 0), font=font2)
+        draw.text((center_x // 2 - (w2 // 2), text_block_y + h1 + line_spacing), text_line2, fill=(0, 0, 0), font=font2)
 
     # 6. 左側：音楽再生マークの描画
     bar_w = 450            
@@ -113,7 +122,6 @@ def generate_l_size_image(
     draw.ellipse((current_x - 6, player_center_y - 6, current_x + 6, player_center_y + 6), fill=(0, 0, 0))
 
     play_size = 25
-    buttons_y = player_center_y + 70      
     draw.polygon([(center_x // 2 - (play_size // 2), buttons_y - play_size), 
                   (center_x // 2 - (play_size // 2), buttons_y + play_size), 
                   (center_x // 2 + play_size, buttons_y)], fill=(0, 0, 0))
@@ -159,10 +167,13 @@ def generate_l_size_image(
 
     # 10. 右側：最下部エリアの文字配置
     right_area_center_x = center_x + (width - center_x) // 2
+    
+    # 1行目（リリース年月日）の配置高さを左側の曲名ブロック(text_block_y)と同期
     if bottom_text_upper:
         w_upper = int(draw.textlength(bottom_text_upper, font=font_bottom_right1))
-        draw.text((right_area_center_x - (w_upper // 2), block_start_y), bottom_text_upper, fill=(0, 0, 0), font=font_bottom_right1)
+        draw.text((right_area_center_x - (w_upper // 2), text_block_y), bottom_text_upper, fill=(0, 0, 0), font=font_bottom_right1)
 
+    # クレジット（作詞・作曲・編曲）の描画
     credits = [f"作詞：{lyricist}", f"作曲：{composer}", f"編曲：{arranger}"]
     max_credit_w = 0
     for line in credits:
@@ -179,6 +190,8 @@ def generate_l_size_image(
     image.save(img_byte_arr, format='JPEG', quality=95)
     return img_byte_arr.getvalue()
 
+import base64
+
 def main(page: ft.Page):
     page.title = "L判写真ジェネレーター"
     page.theme_mode = ft.ThemeMode.LIGHT
@@ -187,7 +200,7 @@ def main(page: ft.Page):
     page.padding = 10
     page.scroll = ft.ScrollMode.ALWAYS 
 
-    # 選択された画像のバイトデータをブラウザ内に安全に一時保持する変数
+    # ★ブラウザ上の仮想メモリに選択した画像を直接保持する変数（Bytes型）
     uploaded_image_bytes = ft.Ref[bytes]()
     selected_image_name = ft.Text("画像が選択されていません (デフォルト白地)", italic=True, size=12)
 
@@ -222,24 +235,20 @@ def main(page: ft.Page):
         preview_img.src_base64 = base64.b64encode(img_bytes).decode("utf-8")
         page.update()
 
-    # ★【画像のWeb反映対応】サーバーへの転送処理（upload_files）を完全に廃止。
-    # ブラウザの仮想メモリ上の生データ（Bytes）をそのままFletへ直接引き渡す処理に変更しました。
+    # ★【画像バグ完全修正】サーバーを介さず、ブラウザ上の生データ(bytes)を一発で取得
     def pick_files_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
-            file_info = e.files[0]
-            selected_image_name.value = f"選択中: {file_info.name}"
-            selected_image_name.italic = False
+            file_info = e.files[0]  # 選択された1枚目のファイルオブジェクト
             
-            # Flet Web環境特有の「ブラウザ内バイナリ一時キャッシュ」から直でデータを読み込む
+            # ブラウザ上で吸い上げたバイトデータを直接Pillowの引数へ渡す
             if file_info.bytes:
                 uploaded_image_bytes.current = file_info.bytes
+                selected_image_name.value = f"選択中: {file_info.name}"
+                selected_image_name.italic = False
+                update_preview()
             else:
-                # 万が一ローカル環境で動かした際への互換性も担保
-                if file_info.path and os.path.exists(file_info.path):
-                    with open(file_info.path, "rb") as f:
-                        uploaded_image_bytes.current = f.read()
-                        
-            update_preview()
+                selected_image_name.value = "画像の読み込みに失敗しました"
+                
         page.update()
 
     file_picker = ft.FilePicker(on_result=pick_files_result)
@@ -267,7 +276,7 @@ def main(page: ft.Page):
         filename = f"{tf_line1.value}.jpg" if tf_line1.value else "print_photo.jpg"
         b64_str = base64.b64encode(img_bytes).decode('utf-8')
         
-        # 確実にスマートフォン側へダウンロードを開始させるバイナリストリーム強制展開
+        # モバイルブラウザ(Safari/Chrome)でも確実に保存が走る強制展開コード
         page.launch_url(
             f"data:image/jpeg;base64,{b64_str}",
             web_window_name="_self"
@@ -347,7 +356,7 @@ def main(page: ft.Page):
         )
     )
 
-# RenderのWEBポートに最適化して起動
+# 最下部のWebサービス起動エントリー
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8550))
